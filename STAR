@@ -1,0 +1,491 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- // ---- SETTINGS & CONFIG ---- //
+local Settings = {
+	AimbotEnabled = false,
+	AimKey = Enum.KeyCode.E,
+	ToggleKey = Enum.KeyCode.RightShift,
+	AimPart = "Head", 
+	Smoothness = 0.2,
+	FOV = 100,
+	WallCheck = true,
+	TeamCheck = false,
+	
+	HighlightEnabled = false,
+	TracersEnabled = false,
+	
+	DefaultWalkSpeed = 16,
+	DefaultJumpHeight = 7.2, -- Standard Roblox JumpHeight studs
+	DefaultJumpPower = 50     -- Standard Roblox JumpPower physics force
+}
+
+local CurrentThemeColor = Color3.fromRGB(0, 255, 200)
+
+-- // ---- FOV CIRCLE ---- //
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+FOVCircle.Radius = Settings.FOV
+FOVCircle.Color = CurrentThemeColor
+FOVCircle.Thickness = 1.5
+FOVCircle.Filled = false
+FOVCircle.Visible = Settings.AimbotEnabled
+
+-- // ---- CORE UTILITIES ---- //
+local function MakeDraggable(frame, dragHandle)
+	local dragging, dragInput, dragStart, startPos
+	dragHandle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = frame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
+			end)
+		end
+	end)
+	dragHandle.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			dragInput = input
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if input == dragInput and dragging then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+
+local function IsVisible(targetPart)
+	if not Settings.WallCheck then return true end
+	local castPoints = {Camera.CFrame.Position, targetPart.Position}
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent}
+	
+	local result = Workspace:Raycast(castPoints[1], castPoints[2] - castPoints[1], params)
+	return result == nil
+end
+
+local function GetClosestPlayer()
+	local closestPlayer = nil
+	local shortestDistance = math.huge
+	local mousePos = UserInputService:GetMouseLocation()
+
+	for _, player in pairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChildOfClass("Humanoid") and player.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
+			if Settings.TeamCheck and player.Team == LocalPlayer.Team then continue end
+			
+			local actualPartName = Settings.AimPart == "Torso" and (player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")) or player.Character:FindFirstChild("Head")
+			
+			if actualPartName then
+				local screenPos, onScreen = Camera:WorldToViewportPoint(actualPartName.Position)
+				if onScreen and IsVisible(actualPartName) then
+					local magnitude = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+					if magnitude < shortestDistance and magnitude <= Settings.FOV then
+						shortestDistance = magnitude
+						closestPlayer = player
+					end
+				end
+			end
+		end
+	end
+	return closestPlayer
+end
+
+-- // ---- UI GENERATION ---- //
+local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+ScreenGui.Name = "PulseV3Engine"
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 340, 0, 520)
+MainFrame.Position = UDim2.new(0.5, -170, 0.35, -260)
+MainFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
+MainFrame.BorderSizePixel = 0
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
+
+local UIStroke = Instance.new("UIStroke", MainFrame)
+UIStroke.Color = CurrentThemeColor
+UIStroke.Thickness = 1.8
+
+local TitleBar = Instance.new("TextLabel", MainFrame)
+TitleBar.Size = UDim2.new(1, 0, 0, 45)
+TitleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+TitleBar.Text = "  STARHUB - DDD"
+TitleBar.TextColor3 = CurrentThemeColor
+TitleBar.TextXAlignment = Enum.TextXAlignment.Left
+TitleBar.Font = Enum.Font.GothamBold
+TitleBar.TextSize = 14
+TitleBar.Active = true
+local TopCorner = Instance.new("UICorner", TitleBar)
+TopCorner.CornerRadius = UDim.new(0, 12)
+
+MakeDraggable(MainFrame, TitleBar)
+
+-- Minimize Button
+local MinimizeBtn = Instance.new("TextButton", TitleBar)
+MinimizeBtn.Size = UDim2.new(0, 32, 0, 32)
+MinimizeBtn.Position = UDim2.new(1, -38, 0, 6)
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+MinimizeBtn.Text = "—"
+MinimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeBtn.Font = Enum.Font.GothamBold
+MinimizeBtn.TextSize = 12
+Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 6)
+
+-- Floating STAR button restore
+local OpenFloatingCircle = Instance.new("TextButton", ScreenGui)
+OpenFloatingCircle.Size = UDim2.new(0, 55, 0, 55)
+OpenFloatingCircle.Position = UDim2.new(0.03, 0, 0.25, 0)
+OpenFloatingCircle.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
+OpenFloatingCircle.Text = "★"
+OpenFloatingCircle.Font = Enum.Font.GothamBold
+OpenFloatingCircle.TextSize = 24
+OpenFloatingCircle.TextColor3 = CurrentThemeColor
+OpenFloatingCircle.Visible = false
+Instance.new("UICorner", OpenFloatingCircle).CornerRadius = UDim.new(1, 0)
+local CircleStroke = Instance.new("UIStroke", OpenFloatingCircle)
+CircleStroke.Color = CurrentThemeColor
+CircleStroke.Thickness = 2
+MakeDraggable(OpenFloatingCircle, OpenFloatingCircle)
+
+-- Mobile Crosshair Lock Toggle
+local MobileAimCircle = Instance.new("TextButton", ScreenGui)
+MobileAimCircle.Size = UDim2.new(0, 65, 0, 65)
+MobileAimCircle.Position = UDim2.new(0.82, 0, 0.45, 0)
+MobileAimCircle.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+MobileAimCircle.Text = "AIM LOCK"
+MobileAimCircle.Font = Enum.Font.GothamBold
+MobileAimCircle.TextSize = 10
+MobileAimCircle.TextColor3 = Color3.fromRGB(255, 80, 80)
+Instance.new("UICorner", MobileAimCircle).CornerRadius = UDim.new(1, 0)
+local AimCircleStroke = Instance.new("UIStroke", MobileAimCircle)
+AimCircleStroke.Color = Color3.fromRGB(255, 80, 80)
+AimCircleStroke.Thickness = 2
+MakeDraggable(MobileAimCircle, MobileAimCircle)
+
+local function SetUIVisible(state)
+	MainFrame.Visible = state
+	OpenFloatingCircle.Visible = not state
+end
+
+MinimizeBtn.MouseButton1Click:Connect(function() SetUIVisible(false) end)
+OpenFloatingCircle.MouseButton1Click:Connect(function() SetUIVisible(true) end)
+UserInputService.InputBegan:Connect(function(input, gpe)
+	if not gpe and input.KeyCode == Settings.ToggleKey then SetUIVisible(not MainFrame.Visible) end
+end)
+
+local mobileAimingActive = false
+MobileAimCircle.MouseButton1Click:Connect(function()
+	mobileAimingActive = not mobileAimingActive
+	if mobileAimingActive then
+		MobileAimCircle.TextColor3 = CurrentThemeColor
+		AimCircleStroke.Color = CurrentThemeColor
+	else
+		MobileAimCircle.TextColor3 = Color3.fromRGB(255, 80, 80)
+		AimCircleStroke.Color = Color3.fromRGB(255, 80, 80)
+	end
+end)
+
+local Container = Instance.new("ScrollingFrame", MainFrame)
+Container.Size = UDim2.new(1, -20, 1, -110)
+Container.Position = UDim2.new(0, 10, 0, 55)
+Container.BackgroundTransparency = 1
+Container.CanvasSize = UDim2.new(0, 0, 0, 620)
+Container.ScrollBarThickness = 2
+
+local UIListLayout = Instance.new("UIListLayout", Container)
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 8)
+
+-- // ---- THEME INTERACTION RE-COLOUR PACKS ---- //
+local TrackedThemeLabels = {}
+local TrackedThemeButtons = {}
+
+local function SyncThemeColors(newColor)
+	CurrentThemeColor = newColor
+	UIStroke.Color = newColor
+	TitleBar.TextColor3 = newColor
+	CircleStroke.Color = newColor
+	Container.ScrollBarImageColor3 = newColor
+	FOVCircle.Color = newColor
+	if mobileAimingActive then
+		MobileAimCircle.TextColor3 = newColor
+		AimCircleStroke.Color = newColor
+	end
+	for _, item in pairs(TrackedThemeLabels) do
+		if item.Instance then item.Instance.BackgroundColor3 = newColor end
+	end
+	for _, item in pairs(TrackedThemeButtons) do
+		if item.Instance and item.IsOn() then item.Instance.BackgroundColor3 = newColor end
+	end
+end
+
+-- Slider Constructor
+local function CreateSlider(text, min, max, default, callback)
+	local sliderFrame = Instance.new("Frame", Container)
+	sliderFrame.Size = UDim2.new(1, 0, 0, 50)
+	sliderFrame.BackgroundTransparency = 1
+	
+	local label = Instance.new("TextLabel", sliderFrame)
+	label.Size = UDim2.new(1, 0, 0, 20)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 12
+	label.TextColor3 = Color3.fromRGB(220, 220, 220)
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	
+	local track = Instance.new("Frame", sliderFrame)
+	track.Size = UDim2.new(1, 0, 0, 6)
+	track.Position = UDim2.new(0, 0, 0, 30)
+	track.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+	track.BorderSizePixel = 0
+	Instance.new("UICorner", track)
+	
+	local fill = Instance.new("Frame", track)
+	fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+	fill.BackgroundColor3 = CurrentThemeColor
+	fill.BorderSizePixel = 0
+	Instance.new("UICorner", fill)
+	
+	table.insert(TrackedThemeLabels, {Instance = fill})
+	
+	local trigger = Instance.new("TextButton", track)
+	trigger.Size = UDim2.new(0, 14, 0, 14)
+	trigger.Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7)
+	trigger.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	trigger.Text = ""
+	Instance.new("UICorner", trigger)
+	
+	local function update(input)
+		local scale = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+		local value = math.floor((min + (scale * (max - min))) * 100) / 100
+		fill.Size = UDim2.new(scale, 0, 1, 0)
+		trigger.Position = UDim2.new(scale, -7, 0.5, -7)
+		label.Text = text .. " : " .. tostring(value)
+		callback(value)
+	end
+	
+	local sliding = false
+	trigger.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then sliding = true end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then sliding = false end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if sliding and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			update(input)
+		end
+	end)
+	
+	label.Text = text .. " : " .. tostring(default)
+	callback(default)
+end
+
+local function CreateToggleButton(text, defaultState, callback)
+	local btn = Instance.new("TextButton", Container)
+	btn.Size = UDim2.new(1, 0, 0, 38)
+	btn.BackgroundColor3 = defaultState and CurrentThemeColor or Color3.fromRGB(35, 35, 45)
+	btn.Text = text .. " : " .. (defaultState and "ON" or "OFF")
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Font = Enum.Font.Gotham
+	btn.TextSize = 13
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	
+	local state = defaultState
+	table.insert(TrackedThemeButtons, {
+		Instance = btn,
+		IsOn = function() return state end
+	})
+	
+	btn.MouseButton1Click:Connect(function()
+		state = not state
+		btn.BackgroundColor3 = state and CurrentThemeColor or Color3.fromRGB(35, 35, 45)
+		btn.Text = text .. " : " .. (state and "ON" or "OFF")
+		callback(state)
+	end)
+	return btn
+end
+
+local function CreateDropdownAimPart()
+	local btn = Instance.new("TextButton", Container)
+	btn.Size = UDim2.new(1, 0, 0, 38)
+	btn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+	btn.Text = "Target Lock Part: [ Head ]"
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 12
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	
+	btn.MouseButton1Click:Connect(function()
+		Settings.AimPart = (Settings.AimPart == "Head") and "Torso" or "Head"
+		btn.Text = "Target Lock Part: [ " .. Settings.AimPart .. " ]"
+	end)
+end
+
+-- Assemble Sliders & Options
+CreateToggleButton("Aimbot Master Toggle", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v end)
+CreateDropdownAimPart()
+CreateToggleButton("Wall Check Filter", Settings.WallCheck, function(v) Settings.WallCheck = v end)
+CreateToggleButton("Team Check (Ignore Allies)", Settings.TeamCheck, function(v) Settings.TeamCheck = v end)
+
+CreateSlider("Aimbot Smoothness", 0.05, 0.95, Settings.Smoothness, function(v) Settings.Smoothness = v end)
+CreateSlider("Aimbot FOV Radius", 30, 400, Settings.FOV, function(v) Settings.FOV = v end)
+
+CreateSlider("LocalPlayer WalkSpeed", 16, 150, Settings.DefaultWalkSpeed, function(v)
+	if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+		LocalPlayer.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = v
+	end
+end)
+
+-- ACCURATE JUMP POWER / JUMP HEIGHT CALIBRATION SLIDER
+CreateSlider("LocalPlayer Jump Height", 7, 100, 7, function(v)
+	if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+		local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		
+		-- Alters JumpHeight safely for modern games
+		hum.JumpHeight = v
+		
+		-- Alters older JumpPower properties automatically in case the game configuration relies on it
+		if v == 7 then
+			hum.JumpPower = Settings.DefaultJumpPower
+		else
+			-- Scale physics calculation to prevent excessive over-clamping
+			hum.UseJumpPower = true
+			hum.JumpPower = math.clamp(v * 7.5, 50, 300) 
+		end
+	end
+end)
+
+CreateToggleButton("Highlight Player Teams (Chams)", Settings.HighlightEnabled, function(v) Settings.HighlightEnabled = v end)
+CreateToggleButton("Snapline View Tracers", Settings.TracersEnabled, function(v) Settings.TracersEnabled = v end)
+
+-- Color Selection Theme Palette Panel
+local ThemePanel = Instance.new("Frame", MainFrame)
+ThemePanel.Size = UDim2.new(1, -20, 0, 45)
+ThemePanel.Position = UDim2.new(0, 10, 1, -55)
+ThemePanel.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+Instance.new("UICorner", ThemePanel).CornerRadius = UDim.new(0, 8)
+
+local ThemeLabel = Instance.new("TextLabel", ThemePanel)
+ThemeLabel.Size = UDim2.new(0.3, 0, 1, 0)
+ThemeLabel.BackgroundTransparency = 1
+ThemeLabel.Text = "THEME:"
+ThemeLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
+ThemeLabel.Font = Enum.Font.GothamBold
+ThemeLabel.TextSize = 11
+
+local ColorsPalette = {
+	Color3.fromRGB(0, 255, 200),  -- Cyan
+	Color3.fromRGB(255, 0, 127),  -- Pink
+	Color3.fromRGB(240, 50, 50),  -- Red
+	Color3.fromRGB(46, 204, 113), -- Green
+	Color3.fromRGB(241, 196, 15)  -- Yellow
+}
+
+for i, color in ipairs(ColorsPalette) do
+	local dot = Instance.new("TextButton", ThemePanel)
+	dot.Size = UDim2.new(0, 22, 0, 22)
+	dot.Position = UDim2.new(0.32, (i - 1) * 28, 0.25, 0)
+	dot.BackgroundColor3 = color
+	dot.Text = ""
+	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+	dot.MouseButton1Click:Connect(function() SyncThemeColors(color) end)
+end
+
+-- Aimbot Loops
+local desktopAiming = false
+UserInputService.InputBegan:Connect(function(input)
+	if input.KeyCode == Settings.AimKey then desktopAiming = true end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Settings.AimKey then desktopAiming = false end
+end)
+
+RunService.RenderStepped:Connect(function()
+	FOVCircle.Position = UserInputService:GetMouseLocation()
+	FOVCircle.Radius = Settings.FOV
+	FOVCircle.Visible = Settings.AimbotEnabled and MainFrame.Visible
+	
+	if Settings.AimbotEnabled and (desktopAiming or mobileAimingActive) then
+		local target = GetClosestPlayer()
+		if target and target.Character then
+			local actualPart = Settings.AimPart == "Torso" and (target.Character:FindFirstChild("UpperTorso") or target.Character:FindFirstChild("Torso")) or target.Character:FindFirstChild("Head")
+			if actualPart then
+				local currentCFrame = Camera.CFrame
+				local targetCFrame = CFrame.new(currentCFrame.Position, actualPart.Position)
+				Camera.CFrame = currentCFrame:Lerp(targetCFrame, 1 - Settings.Smoothness)
+			end
+		end
+	end
+end)
+
+-- Chams Highlight Controller
+local VisualsStorage = {}
+local function HandlePlayerVisuals(player)
+	if player == LocalPlayer then return end
+	local tracer = Drawing.new("Line")
+	tracer.Thickness = 1.5
+	tracer.Visible = false
+	
+	local function clearHighlight(char)
+		if char and char:FindFirstChild("ESP_Highlight") then char.ESP_Highlight:Destroy() end
+	end
+
+	local connection
+	connection = RunService.RenderStepped:Connect(function()
+		local char = player.Character
+		if not player.Parent or not VisualsStorage[player] then
+			tracer:Destroy()
+			if char then clearHighlight(char) end
+			connection:Disconnect()
+			return
+		end
+		
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local teamColor = player.TeamColor and player.TeamColor.Color or Color3.fromRGB(255, 255, 255)
+		
+		if hrp and hum and hum.Health > 0 then
+			local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+			if onScreen and Settings.TracersEnabled then
+				tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+				tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+				tracer.Color = teamColor
+				tracer.Visible = true
+			else
+				tracer.Visible = false
+			end
+			
+			if Settings.HighlightEnabled then
+				local hl = char:FindFirstChild("ESP_Highlight")
+				if not hl then
+					hl = Instance.new("Highlight", char)
+					hl.Name = "ESP_Highlight"
+				end
+				hl.FillColor = teamColor
+				hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+				hl.FillTransparency = 0.4
+				hl.Enabled = true
+			else
+				clearHighlight(char)
+			end
+		else
+			tracer.Visible = false
+			clearHighlight(char)
+		end
+	end)
+	VisualsStorage[player] = {Tracer = tracer}
+end
+
+Players.PlayerAdded:Connect(HandlePlayerVisuals)
+for _, p in pairs(Players:GetPlayers()) do HandlePlayerVisuals(p) end
+Players.PlayerRemoving:Connect(function(p) VisualsStorage[p] = nil end)
